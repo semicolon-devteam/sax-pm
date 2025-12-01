@@ -13,11 +13,13 @@
 - 종료, close, 완료, 회고, retrospective
 - Velocity, 속도, 생산성
 - 작업량, estimate, point, 포인트, 추정
+- 시작, start, 작업중, in progress, 착수
 
 **위임 사유 템플릿**:
 - Sprint 생성 요청
 - Task Sprint 할당
 - Task 작업량 설정
+- Task 작업 시작
 - Sprint 종료 처리
 - Velocity 계산
 
@@ -62,6 +64,7 @@
 | 도움말, help, 사용법 | sax-help | - |
 | 동기화, sync | sync-project-status | Projects 관련 |
 | 작업량 설정, estimate 설정 | set-estimate | Sprint 할당 없이 작업량만 설정 |
+| 작업 시작, start task | start-task | 상태+시작일+이터레이션 일괄 설정 |
 
 ---
 

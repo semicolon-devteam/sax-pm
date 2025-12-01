@@ -59,6 +59,21 @@ Sprint 생성 요청
 완료
 ```
 
+### Task 작업 시작
+
+```text
+작업 시작 요청
+    ↓
+[SAX] Skill: start-task 호출
+    ↓
+1. 대상 Task 확인
+2. 상태 → 작업중 변경
+3. 시작일 → 오늘 설정
+4. 이터레이션 → Current 할당
+    ↓
+완료
+```
+
 ### Task Sprint 할당
 
 ```text
@@ -98,6 +113,7 @@ Sprint 종료 요청
 |-------|------|
 | `create-sprint` | Sprint 생성 |
 | `set-estimate` | Task 작업량 설정 |
+| `start-task` | Task 작업 시작 (상태+시작일+이터레이션) |
 | `assign-to-sprint` | Task Sprint 할당 |
 | `close-sprint` | Sprint 종료 |
 | `calculate-velocity` | Velocity 계산 |
