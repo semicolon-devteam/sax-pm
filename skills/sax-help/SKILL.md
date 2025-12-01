@@ -128,7 +128,7 @@ SAX-PM 패키지의 기능과 사용법을 안내합니다.
 - **SAX-Core**: 공통 Skill (notify-slack 등)
 
 ---
-*SAX-PM v0.1.0*
+*SAX-PM v0.2.0*
 ```
 
 ## 완료 메시지

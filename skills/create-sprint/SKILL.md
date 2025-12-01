@@ -1,7 +1,7 @@
 ---
 name: create-sprint
 description: |
-  Sprint Issue 및 Milestone 생성. Use when (1) 새 Sprint 시작,
+  Sprint(Iteration) 목표 설정 및 시작. Use when (1) 새 Sprint 시작,
   (2) Sprint 계획 수립, (3) /SAX:sprint create 커맨드.
 tools: [Bash, Read, Write]
 model: inherit
@@ -11,22 +11,23 @@ model: inherit
 
 # create-sprint Skill
 
-> Sprint Issue 및 GitHub Milestone 생성
+> Sprint 목표 설정 및 Iteration 활성화
 
 ## Purpose
 
-새로운 Sprint를 생성하고 관련 GitHub 리소스를 설정합니다.
+기존 GitHub Projects Iteration을 Sprint로 활용하여 목표를 설정하고 Sprint를 시작합니다.
+
+> **Note**: Iteration은 GitHub Projects에서 자동 생성됩니다. 이 Skill은 해당 Iteration을 Sprint로 "선언"하고 목표를 설정합니다.
 
 ## Workflow
 
 ```
-Sprint 생성 요청
+Sprint 시작 요청
     ↓
-1. Sprint 정보 수집 (이름, 기간, 목표)
-2. GitHub Milestone 생성
-3. Sprint Issue 생성 (docs 레포)
-4. Projects #1 연결
-5. sprint-current 라벨 관리
+1. 현재/다음 Iteration 조회
+2. Sprint Issue 생성 (docs 레포)
+3. Sprint 목표 설정
+4. 알림 전송 (선택)
     ↓
 완료
 ```
@@ -34,12 +35,11 @@ Sprint 생성 요청
 ## Input
 
 ```yaml
-sprint_name: "Sprint 23"          # 필수
-start_date: "2024-12-02"          # 필수
-end_date: "2024-12-13"            # 필수
-goals:                            # 선택
+iteration_title: "12월 1/4"           # 필수 (GitHub Projects Iteration 이름)
+goals:                                # 선택
   - "댓글 기능 완성"
   - "알림 연동 시작"
+notify_slack: true                    # 선택
 ```
 
 ## Output
@@ -47,23 +47,36 @@ goals:                            # 선택
 ```markdown
 [SAX] Skill: create-sprint 완료
 
-✅ Sprint 23 생성 완료
+✅ Sprint "12월 1/4" 시작
 
-**Milestone**: [Sprint 23](milestone_url)
+**기간**: 2025-12-01 ~ 2025-12-07 (1주)
 **Sprint Issue**: [#123](issue_url)
-**기간**: 2024-12-02 ~ 2024-12-13
 ```
 
 ## API 호출
 
-### Milestone 생성
+### Iteration 조회 (GraphQL)
 
 ```bash
-gh api repos/semicolon-devteam/docs/milestones \
-  -X POST \
-  -f title="Sprint 23" \
-  -f due_on="2024-12-13T23:59:59Z" \
-  -f description="Sprint 23: 댓글 기능 완성"
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      field(name: "이터레이션") {
+        ... on ProjectV2IterationField {
+          configuration {
+            iterations {
+              id
+              title
+              startDate
+              duration
+            }
+          }
+        }
+      }
+    }
+  }
+}'
 ```
 
 ### Sprint Issue 생성
@@ -71,38 +84,34 @@ gh api repos/semicolon-devteam/docs/milestones \
 ```bash
 gh issue create \
   --repo semicolon-devteam/docs \
-  --title "🏃 Sprint 23: 댓글 기능 완성" \
+  --title "🏃 Sprint: 12월 1/4" \
   --label "sprint,sprint-current" \
-  --milestone "Sprint 23" \
   --body "$(cat <<'EOF'
-# 🏃 Sprint 23: 댓글 기능 완성
+# 🏃 Sprint: 12월 1/4
 
-**기간**: 2024-12-02 ~ 2024-12-13
-**Milestone**: Sprint 23
+**Iteration**: 12월 1/4
+**기간**: 2025-12-01 ~ 2025-12-07
 
 ## 🎯 Sprint 목표
 - 댓글 기능 완성
 - 알림 연동 시작
 
 ## 📋 포함된 Task
-| # | Task | Point | 담당자 | 상태 |
-|---|------|-------|--------|------|
-| - | (할당 예정) | - | - | - |
+> GitHub Projects "이슈관리" → 이터레이션 "12월 1/4" 필터로 확인
 
-## 📊 용량
-- **총 Point**: 0
-- **팀 용량**: 40pt
-- **여유**: 40pt
+[📊 Projects 보기](https://github.com/orgs/semicolon-devteam/projects/1/views/1?filterQuery=iteration:"12월 1/4")
 
-## 📈 진행 상황
-- ✅ 완료: 0 (0pt)
-- 🔄 진행중: 0 (0pt)
-- ⏳ 대기: 0 (0pt)
+## 📈 진행 현황
+| 상태 | 개수 |
+|------|------|
+| 작업중 | 0 |
+| 완료 | 0 |
+| 대기 | 0 |
 EOF
 )"
 ```
 
-### 이전 Sprint 정리
+### 이전 Sprint Issue 정리
 
 ```bash
 # 이전 sprint-current 라벨 제거
@@ -111,34 +120,35 @@ gh issue list \
   --label "sprint-current" \
   --json number \
   | jq -r '.[].number' \
-  | xargs -I {} gh issue edit {} --remove-label "sprint-current"
+  | xargs -I {} gh issue edit {} --remove-label "sprint-current" --add-label "sprint-closed"
 ```
 
 ## Sprint Issue 템플릿
 
 ```markdown
-# 🏃 {sprint_name}: {sprint_goal}
+# 🏃 Sprint: {iteration_title}
 
+**Iteration**: {iteration_title}
 **기간**: {start_date} ~ {end_date}
-**Milestone**: [{sprint_name}]({milestone_url})
 
 ## 🎯 Sprint 목표
 {goals_list}
 
 ## 📋 포함된 Task
-| # | Task | Point | 담당자 | 상태 |
-|---|------|-------|--------|------|
-{task_rows}
+> GitHub Projects "이슈관리" → 이터레이션 "{iteration_title}" 필터로 확인
+
+[📊 Projects 보기](https://github.com/orgs/semicolon-devteam/projects/1/views/1?filterQuery=iteration:"{iteration_title}")
+
+## 📈 진행 현황
+| 상태 | 개수 | Point |
+|------|------|-------|
+| 작업중 | {in_progress} | {ip_points}pt |
+| 완료 | {done} | {done_points}pt |
+| 대기 | {todo} | {todo_points}pt |
 
 ## 📊 용량
-- **총 Point**: {total_points}
+- **총 할당**: {total_points}pt
 - **팀 용량**: {capacity}pt
-- **여유**: {remaining}pt
-
-## 📈 진행 상황
-- ✅ 완료: {done_count} ({done_points}pt)
-- 🔄 진행중: {progress_count} ({progress_points}pt)
-- ⏳ 대기: {todo_count} ({todo_points}pt)
 ```
 
 ## 완료 메시지
@@ -146,14 +156,13 @@ gh issue list \
 ```markdown
 [SAX] Skill: create-sprint 완료
 
-✅ **{sprint_name}** 생성 완료
+✅ **Sprint "{iteration_title}"** 시작
 
 | 항목 | 값 |
 |------|-----|
-| Milestone | [{sprint_name}]({milestone_url}) |
-| Sprint Issue | [#{issue_number}]({issue_url}) |
+| Iteration | {iteration_title} |
 | 기간 | {start_date} ~ {end_date} |
-| 팀 용량 | {capacity}pt |
+| Sprint Issue | [#{issue_number}]({issue_url}) |
 
 다음 단계: `/SAX:sprint add` 명령어로 Task를 Sprint에 할당하세요.
 ```

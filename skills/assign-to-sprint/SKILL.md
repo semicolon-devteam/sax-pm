@@ -1,7 +1,7 @@
 ---
 name: assign-to-sprint
 description: |
-  Task를 Sprint에 할당. Use when (1) Sprint 계획 시 Task 선정,
+  Task를 Sprint(Iteration)에 할당. Use when (1) Sprint 계획 시 Task 선정,
   (2) Task 추가 할당, (3) /SAX:sprint add 커맨드.
 tools: [Bash, Read]
 model: inherit
@@ -11,23 +11,22 @@ model: inherit
 
 # assign-to-sprint Skill
 
-> Task를 Sprint에 할당하고 라벨/마일스톤 설정
+> Task를 Sprint(Iteration)에 할당하고 작업량 설정
 
 ## Purpose
 
-Backlog의 Task를 특정 Sprint에 할당합니다.
+GitHub Projects의 Iteration 필드를 통해 Task를 Sprint에 할당합니다.
 
 ## Workflow
 
 ```
 Task 할당 요청
     ↓
-1. 대상 Task 확인
-2. 용량 체크 (초과 경고)
-3. sprint-N 라벨 추가
-4. Milestone 연결
-5. sprint-backlog 라벨 제거
-6. Sprint Issue 업데이트
+1. 대상 Task(Issue) 확인
+2. Projects에서 Item ID 조회
+3. Iteration 필드 값 설정
+4. 작업량(Point) 설정 (선택)
+5. 용량 체크
     ↓
 완료
 ```
@@ -35,11 +34,14 @@ Task 할당 요청
 ## Input
 
 ```yaml
-sprint_name: "Sprint 23"          # 필수
-task_numbers:                     # 필수
-  - 123
-  - 124
-  - 125
+iteration_title: "12월 1/4"           # 필수
+tasks:                                # 필수
+  - repo: "command-center"
+    number: 123
+    workload: 3                       # 선택 (작업량 필드)
+  - repo: "cm-land"
+    number: 456
+    workload: 5
 ```
 
 ## Output
@@ -47,101 +49,204 @@ task_numbers:                     # 필수
 ```markdown
 [SAX] Skill: assign-to-sprint 완료
 
-✅ 3개 Task를 Sprint 23에 할당했습니다.
+✅ 2개 Task를 "12월 1/4"에 할당했습니다.
 
-| # | Task | Point | 담당자 |
-|---|------|-------|--------|
-| #123 | 댓글 API | 5 | @kyago |
-| #124 | 댓글 UI | 3 | @Garden |
-| #125 | 알림 연동 | 5 | @Roki |
+| Repo | # | Task | 작업량 | 담당자 |
+|------|---|------|--------|--------|
+| command-center | #123 | 댓글 API | 3 | @kyago |
+| cm-land | #456 | 알림 연동 | 5 | @Garden |
 
-**Sprint 용량**: 35/40pt (87%)
+**Sprint 용량**: 8pt 할당
 ```
 
 ## API 호출
 
-### Task 정보 조회
+### Issue의 Project Item ID 조회
 
 ```bash
-# Task 상세 조회
-gh issue view {number} \
-  --repo semicolon-devteam/docs \
-  --json number,title,labels,assignees
+gh api graphql -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      projectItems(first: 10) {
+        nodes {
+          id
+          project {
+            number
+            title
+          }
+        }
+      }
+    }
+  }
+}' -f owner="semicolon-devteam" -f repo="command-center" -F number=123
 ```
 
-### 라벨/마일스톤 설정
+### Iteration 필드 ID 및 Option ID 조회
 
 ```bash
-# Sprint 라벨 추가, backlog 라벨 제거
-gh issue edit {number} \
-  --repo semicolon-devteam/docs \
-  --add-label "sprint-23" \
-  --remove-label "sprint-backlog" \
-  --milestone "Sprint 23"
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      id
+      field(name: "이터레이션") {
+        ... on ProjectV2IterationField {
+          id
+          configuration {
+            iterations {
+              id
+              title
+            }
+          }
+        }
+      }
+    }
+  }
+}'
 ```
 
-### 용량 체크
+### Iteration 필드 값 설정
 
 ```bash
-# 현재 Sprint 할당량 조회
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --json labels \
-  | jq '[.[] | .labels[] | select(.name | startswith("point-")) | .name | split("-")[1] | tonumber] | add'
+gh api graphql -f query='
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $iterationId: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { iterationId: $iterationId }
+    }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}' \
+  -f projectId="PVT_kwDOC01-Rc4AtDz2" \
+  -f itemId="{item_id}" \
+  -f fieldId="PVTIF_lADOC01-Rc4AtDz2zgj4d7g" \
+  -f iterationId="{iteration_id}"
 ```
 
-## 용량 경고
+### 작업량(Point) 설정
 
-### 정상 (80% 미만)
+```bash
+# 작업량 필드 ID 조회
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      field(name: "작업량") {
+        ... on ProjectV2Field {
+          id
+        }
+      }
+    }
+  }
+}'
+
+# 작업량 값 설정
+gh api graphql -f query='
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Float!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { number: $value }
+    }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}' \
+  -f projectId="PVT_kwDOC01-Rc4AtDz2" \
+  -f itemId="{item_id}" \
+  -f fieldId="{workload_field_id}" \
+  -F value=3
+```
+
+### Issue가 Project에 없는 경우 추가
+
+```bash
+gh api graphql -f query='
+mutation($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(
+    input: {
+      projectId: $projectId
+      contentId: $contentId
+    }
+  ) {
+    item {
+      id
+    }
+  }
+}' \
+  -f projectId="PVT_kwDOC01-Rc4AtDz2" \
+  -f contentId="{issue_node_id}"
+```
+
+## 용량 체크
+
+### 현재 Sprint 할당량 조회
+
+```bash
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+          fieldValueByName(name: "작업량") {
+            ... on ProjectV2ItemFieldNumberValue {
+              number
+            }
+          }
+        }
+      }
+    }
+  }
+}' | jq '[.data.organization.projectV2.items.nodes[] | select(.fieldValueByName.title == "12월 1/4") | .fieldValueByName.number // 0] | add'
+```
+
+### 용량 경고
+
+#### 정상 (80% 미만)
 
 ```markdown
-✅ 3개 Task 할당 완료
+✅ Task 할당 완료
 
-**Sprint 용량**: 28/40pt (70%)
+**Sprint 용량**: 28pt (팀 용량 대비 적정)
 ```
 
-### 주의 (80-90%)
+#### 주의 (80-100%)
 
 ```markdown
-⚠️ 3개 Task 할당 완료
+⚠️ Task 할당 완료
 
-**Sprint 용량**: 35/40pt (87%) - 주의
+**Sprint 용량**: 38pt - 주의
 
-Sprint 용량이 87%입니다. 추가 할당 시 주의하세요.
+Sprint 용량이 많습니다. 추가 할당 시 주의하세요.
 ```
 
-### 위험 (90% 이상)
+#### 위험 (100% 이상)
 
 ```markdown
 🚨 용량 초과 경고
 
-현재 Sprint 할당량: 42/40pt (105%)
+현재 Sprint 할당량: 45pt
 
 **권장 조치**:
 1. 우선순위 낮은 Task 다음 Sprint로 이관
-2. Task 분할
-3. 리소스 추가 검토
-
-그래도 할당하시겠습니까? (y/n)
-```
-
-## Sprint Issue 업데이트
-
-할당 후 Sprint Issue의 Task 테이블 업데이트:
-
-```markdown
-## 📋 포함된 Task
-| # | Task | Point | 담당자 | 상태 |
-|---|------|-------|--------|------|
-| #123 | 댓글 API | 5 | @kyago | ⏳ |
-| #124 | 댓글 UI | 3 | @Garden | ⏳ |
-| #125 | 알림 연동 | 5 | @Roki | ⏳ |
-
-## 📊 용량
-- **총 Point**: 13
-- **팀 용량**: 40pt
-- **여유**: 27pt
+2. Task 분할 검토
 ```
 
 ## 완료 메시지
@@ -149,12 +254,11 @@ Sprint 용량이 87%입니다. 추가 할당 시 주의하세요.
 ```markdown
 [SAX] Skill: assign-to-sprint 완료
 
-✅ {count}개 Task를 {sprint_name}에 할당했습니다.
+✅ {count}개 Task를 "{iteration_title}"에 할당했습니다.
 
-| # | Task | Point | 담당자 |
-|---|------|-------|--------|
+| Repo | # | Task | 작업량 | 담당자 |
+|------|---|------|--------|--------|
 {task_rows}
 
-**Sprint 용량**: {assigned}/{capacity}pt ({usage}%)
-**Sprint Issue**: [#{sprint_issue}]({issue_url}) 업데이트됨
+**Sprint 총 작업량**: {total_workload}pt
 ```

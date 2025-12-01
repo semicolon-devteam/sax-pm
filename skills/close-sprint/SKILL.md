@@ -1,7 +1,7 @@
 ---
 name: close-sprint
 description: |
-  Sprint 종료 및 회고 정리. Use when (1) Sprint 마감,
+  Sprint(Iteration) 종료 및 회고 정리. Use when (1) Sprint 마감,
   (2) 회고 작성, (3) /SAX:sprint close 커맨드.
 tools: [Bash, Read, Write]
 model: inherit
@@ -11,24 +11,25 @@ model: inherit
 
 # close-sprint Skill
 
-> Sprint 종료 처리 및 회고 생성
+> Sprint(Iteration) 종료 처리 및 회고 생성
 
 ## Purpose
 
-Sprint를 종료하고 회고를 정리하며, 미완료 Task를 다음 Sprint로 이관합니다.
+Sprint를 종료하고 회고를 정리하며, 미완료 Task를 다음 Iteration으로 이관합니다.
+
+> **Note**: GitHub Projects Iteration은 기간이 지나면 자동으로 "완료됨"으로 이동합니다. 이 Skill은 Sprint 종료 시점의 통계를 정리하고 회고를 기록합니다.
 
 ## Workflow
 
 ```
 Sprint 종료 요청
     ↓
-1. 완료/미완료 Task 집계
-2. Velocity 계산
+1. Iteration의 완료/미완료 Task 집계
+2. Velocity 계산 (완료된 작업량 합계)
 3. 회고 요약 생성
-4. Sprint Issue 업데이트
-5. Milestone 종료
-6. 미완료 Task → 다음 Sprint 이관
-7. sprint-current 라벨 제거
+4. Sprint Issue에 회고 추가
+5. 미완료 Task → 다음 Iteration 이관
+6. sprint-current 라벨 제거
     ↓
 완료
 ```
@@ -36,9 +37,9 @@ Sprint 종료 요청
 ## Input
 
 ```yaml
-sprint_name: "Sprint 23"          # 필수
-next_sprint: "Sprint 24"          # 선택 (미완료 이관용)
-retrospective:                    # 선택
+iteration_title: "11월 4/4"           # 필수
+next_iteration: "12월 1/4"            # 선택 (미완료 이관용)
+retrospective:                        # 선택
   good:
     - "API 개발 순조로움"
   improve:
@@ -50,72 +51,139 @@ retrospective:                    # 선택
 ```markdown
 [SAX] Skill: close-sprint 완료
 
-✅ Sprint 23 종료 완료
+✅ Sprint "11월 4/4" 종료 완료
 
 **완료**: 8/10 Task (80%)
-**Velocity**: 32pt
-**미완료 이관**: 2 Task → Sprint 24
+**Velocity**: 24pt
+**미완료 이관**: 2 Task → 12월 1/4
 ```
 
 ## API 호출
 
-### Sprint Task 집계
+### Iteration의 모든 Task 조회
 
 ```bash
-# Sprint 23 Task 조회
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --state all \
-  --json number,title,state,labels,assignees
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          content {
+            ... on Issue {
+              number
+              title
+              state
+              repository {
+                name
+              }
+              assignees(first: 3) {
+                nodes {
+                  login
+                }
+              }
+            }
+          }
+          fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+          fieldValueByName(name: "작업량") {
+            ... on ProjectV2ItemFieldNumberValue {
+              number
+            }
+          }
+          fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}'
 ```
 
-### Velocity 계산
+### 완료/미완료 집계
 
 ```bash
-# 완료된 Task의 Point 합계
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --state closed \
-  --json labels \
-  | jq '[.[] | .labels[] | select(.name | startswith("point-")) | .name | split("-")[1] | tonumber] | add'
+# 위 쿼리 결과에서 필터링
+| jq '
+  .data.organization.projectV2.items.nodes
+  | map(select(.fieldValueByName.title == "11월 4/4"))
+  | {
+      total: length,
+      done: [.[] | select(.content.state == "CLOSED")] | length,
+      open: [.[] | select(.content.state == "OPEN")] | length,
+      velocity: [.[] | select(.content.state == "CLOSED") | .fieldValueByName.number // 0] | add
+    }
+'
 ```
 
-### Milestone 종료
+### 미완료 Task → 다음 Iteration 이관
 
 ```bash
-# Milestone 번호 조회
-MILESTONE_NUMBER=$(gh api repos/semicolon-devteam/docs/milestones \
-  --jq '.[] | select(.title == "Sprint 23") | .number')
+# 1. 미완료 Task의 Item ID 조회
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          id
+          content {
+            ... on Issue {
+              state
+            }
+          }
+          fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+        }
+      }
+    }
+  }
+}' | jq '[.data.organization.projectV2.items.nodes[] | select(.fieldValueByName.title == "11월 4/4" and .content.state == "OPEN") | .id]'
 
-# Milestone 종료
-gh api repos/semicolon-devteam/docs/milestones/$MILESTONE_NUMBER \
-  -X PATCH \
-  -f state="closed"
+# 2. 다음 Iteration으로 이관 (각 Item에 대해)
+gh api graphql -f query='
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $iterationId: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { iterationId: $iterationId }
+    }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}' \
+  -f projectId="PVT_kwDOC01-Rc4AtDz2" \
+  -f itemId="{item_id}" \
+  -f fieldId="PVTIF_lADOC01-Rc4AtDz2zgj4d7g" \
+  -f iterationId="{next_iteration_id}"
 ```
 
-### 미완료 Task 이관
+### Sprint Issue에 회고 추가
 
 ```bash
-# 미완료 Task → 다음 Sprint
-gh issue list \
+# Sprint Issue 찾기
+SPRINT_ISSUE=$(gh issue list \
   --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --state open \
+  --label "sprint-current" \
+  --search "Sprint: 11월 4/4" \
   --json number \
-  | jq -r '.[].number' \
-  | xargs -I {} gh issue edit {} \
-    --remove-label "sprint-23" \
-    --add-label "sprint-24" \
-    --milestone "Sprint 24"
-```
+  | jq -r '.[0].number')
 
-### Sprint Issue 업데이트
-
-```bash
-# 회고 추가
-gh issue comment {sprint_issue_number} \
+# 회고 코멘트 추가
+gh issue comment $SPRINT_ISSUE \
   --repo semicolon-devteam/docs \
   --body "$(cat <<'EOF'
 ## 📝 Sprint 회고
@@ -129,14 +197,16 @@ gh issue comment {sprint_issue_number} \
 - 코드 리뷰 지연
 
 ### 📊 통계
-- 완료: 8/10 Task (80%)
-- Velocity: 32pt
-- 미완료 이관: 2 Task → Sprint 24
+| 항목 | 값 |
+|------|-----|
+| 완료 Task | 8/10 (80%) |
+| Velocity | 24pt |
+| 미완료 이관 | 2 Task → 12월 1/4 |
 EOF
 )"
 
-# sprint-current 라벨 제거
-gh issue edit {sprint_issue_number} \
+# 라벨 변경
+gh issue edit $SPRINT_ISSUE \
   --repo semicolon-devteam/docs \
   --remove-label "sprint-current" \
   --add-label "sprint-closed"
@@ -154,16 +224,61 @@ gh issue edit {sprint_issue_number} \
 {improve_points}
 
 ### 📊 통계
-- **완료**: {done_count}/{total_count} Task ({completion_rate}%)
-- **Velocity**: {velocity}pt
-- **미완료 이관**: {carry_over_count} Task → {next_sprint}
+| 항목 | 값 |
+|------|-----|
+| 완료 Task | {done_count}/{total_count} ({completion_rate}%) |
+| Velocity | {velocity}pt |
+| 미완료 이관 | {carry_over_count} Task → {next_iteration} |
 
-### 📈 트렌드
-| Sprint | Velocity | 완료율 |
-|--------|----------|--------|
-| {prev_sprint_2} | {prev_velocity_2}pt | {prev_rate_2}% |
-| {prev_sprint_1} | {prev_velocity_1}pt | {prev_rate_1}% |
-| {current_sprint} | {velocity}pt | {completion_rate}% |
+### 📈 Velocity 트렌드
+| Iteration | Velocity | 완료율 |
+|-----------|----------|--------|
+| {prev_iteration_2} | {prev_velocity_2}pt | {prev_rate_2}% |
+| {prev_iteration_1} | {prev_velocity_1}pt | {prev_rate_1}% |
+| {current_iteration} | {velocity}pt | {completion_rate}% |
+```
+
+## Velocity 트렌드 조회
+
+```bash
+# 최근 완료된 Iteration들의 Velocity
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      field(name: "이터레이션") {
+        ... on ProjectV2IterationField {
+          configuration {
+            completedIterations {
+              id
+              title
+              startDate
+            }
+          }
+        }
+      }
+      items(first: 100) {
+        nodes {
+          content {
+            ... on Issue {
+              state
+            }
+          }
+          fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+          fieldValueByName(name: "작업량") {
+            ... on ProjectV2ItemFieldNumberValue {
+              number
+            }
+          }
+        }
+      }
+    }
+  }
+}'
 ```
 
 ## 완료 메시지
@@ -171,7 +286,7 @@ gh issue edit {sprint_issue_number} \
 ```markdown
 [SAX] Skill: close-sprint 완료
 
-✅ **{sprint_name}** 종료 완료
+✅ **Sprint "{iteration_title}"** 종료 완료
 
 ## 📊 Sprint 결과
 
@@ -179,13 +294,13 @@ gh issue edit {sprint_issue_number} \
 |------|-----|
 | 완료 Task | {done_count}/{total_count} ({completion_rate}%) |
 | Velocity | {velocity}pt |
-| 미완료 이관 | {carry_over_count} Task → {next_sprint} |
+| 미완료 이관 | {carry_over_count} Task → {next_iteration} |
 
 ## 📈 Velocity 트렌드
-| Sprint | Velocity |
-|--------|----------|
-| {sprint_name} | {velocity}pt |
-| 3 Sprint 평균 | {avg_velocity}pt |
+| Iteration | Velocity |
+|-----------|----------|
+| {iteration_title} | {velocity}pt |
+| 최근 4주 평균 | {avg_velocity}pt |
 
-{next_sprint}이 준비되었습니다.
+다음 Sprint "{next_iteration}"이 시작되었습니다.
 ```

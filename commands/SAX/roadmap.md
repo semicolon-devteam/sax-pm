@@ -42,14 +42,14 @@
 
 ---
 
-### milestone - 마일스톤 관리
+### iteration - Iteration 현황
 
 ```bash
-/SAX:roadmap milestone list
-/SAX:roadmap milestone create "v2.0 Release" --due 2024-12-31
+/SAX:roadmap iteration list
+/SAX:roadmap iteration "12월 1/4"
 ```
 
-마일스톤 목록 조회 또는 생성합니다.
+Iteration 목록 조회 또는 특정 Iteration 현황을 확인합니다.
 
 ---
 

@@ -22,7 +22,7 @@ model: inherit
 ```
 블로커 감지 요청
     ↓
-1. In Progress 장기 Task 감지 (3일+)
+1. 작업중 장기 Task 감지 (3일+)
 2. blocked 라벨 Task 조회
 3. 의존성 미해결 Task 확인
 4. 심각도 분류
@@ -34,7 +34,7 @@ model: inherit
 ## Input
 
 ```yaml
-sprint_name: "Sprint 23"          # 선택 (기본: 현재 Sprint)
+iteration_title: "12월 1/4"       # 선택 (기본: 현재 Iteration)
 threshold_days: 3                 # 선택 (지연 판정 기준, 기본 3일)
 notify: true                      # 선택 (Slack 알림 여부)
 ```
@@ -44,20 +44,20 @@ notify: true                      # 선택 (Slack 알림 여부)
 ```markdown
 # 🚨 블로커 현황
 
-**기준일**: 2024-12-10
-**Sprint**: Sprint 23
+**기준일**: 2025-12-05
+**Iteration**: 12월 1/4
 
 ## 🔴 Critical (즉시 조치 필요)
 
-| # | Task | 담당자 | 지연 | 원인 |
-|---|------|--------|------|------|
-| #234 | 댓글 API | @kyago | 5일 | blocked 라벨 |
+| Repo | # | Task | 담당자 | 지연 | 원인 |
+|------|---|------|--------|------|------|
+| core-backend | #234 | 댓글 API | @kyago | 5일 | blocked 라벨 |
 
 ## 🟡 Warning (주의 필요)
 
-| # | Task | 담당자 | 지연 | 원인 |
-|---|------|--------|------|------|
-| #456 | 알림 연동 | @Garden | 3일 | In Progress 장기 |
+| Repo | # | Task | 담당자 | 지연 | 원인 |
+|------|---|------|--------|------|------|
+| cm-land | #456 | 알림 연동 | @Garden | 3일 | 작업중 장기 |
 
 ## 📊 요약
 - Critical: 1
@@ -71,10 +71,10 @@ notify: true                      # 선택 (Slack 알림 여부)
 
 | 상태 | 경과 시간 | 심각도 |
 |------|----------|--------|
-| In Progress | 3-4일 | 🟡 Warning |
-| In Progress | 5일+ | 🔴 Critical |
-| Review | 2일+ | 🟡 Warning |
-| Review | 4일+ | 🔴 Critical |
+| 작업중 | 3-4일 | 🟡 Warning |
+| 작업중 | 5일+ | 🔴 Critical |
+| 리뷰요청 | 2일+ | 🟡 Warning |
+| 리뷰요청 | 4일+ | 🔴 Critical |
 
 ### 블로커 유형
 
@@ -87,29 +87,48 @@ notify: true                      # 선택 (Slack 알림 여부)
 
 ## API 호출
 
-### In Progress Task 조회
+### Iteration Task 전체 조회
 
 ```bash
-# In Progress 상태 Task (Projects 기준)
 gh api graphql -f query='
 {
-  repository(owner: "semicolon-devteam", name: "docs") {
-    issues(first: 100, labels: ["sprint-23"], states: [OPEN]) {
-      nodes {
-        number
-        title
-        createdAt
-        updatedAt
-        assignees(first: 3) { nodes { login } }
-        projectItems(first: 1) {
-          nodes {
-            fieldValues(first: 10) {
-              nodes {
-                ... on ProjectV2ItemFieldSingleSelectValue {
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          id
+          updatedAt
+          content {
+            ... on Issue {
+              number
+              title
+              state
+              createdAt
+              updatedAt
+              repository {
+                name
+              }
+              labels(first: 10) {
+                nodes {
                   name
-                  updatedAt
                 }
               }
+              assignees(first: 3) {
+                nodes {
+                  login
+                }
+              }
+            }
+          }
+          iteration: fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+          status: fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+              updatedAt
             }
           }
         }
@@ -119,14 +138,67 @@ gh api graphql -f query='
 }'
 ```
 
+### 지연 Task 필터링 (jq)
+
+```bash
+# 현재 Iteration에서 작업중 상태가 3일 이상인 Task
+| jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  .data.organization.projectV2.items.nodes
+  | map(select(.iteration.title == "12월 1/4"))
+  | map(select(.status.name == "작업중"))
+  | map(. + {
+      days_since_update: (
+        (($now | fromdate) - (.status.updatedAt | fromdate)) / 86400 | floor
+      )
+    })
+  | map(select(.days_since_update >= 3))
+  | sort_by(.days_since_update) | reverse
+'
+```
+
 ### blocked 라벨 Task
 
 ```bash
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "blocked" \
-  --state open \
-  --json number,title,assignees,updatedAt
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          content {
+            ... on Issue {
+              number
+              title
+              state
+              repository {
+                name
+              }
+              labels(first: 10) {
+                nodes {
+                  name
+                }
+              }
+              assignees(first: 3) {
+                nodes {
+                  login
+                }
+              }
+            }
+          }
+          iteration: fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+        }
+      }
+    }
+  }
+}' | jq '
+  .data.organization.projectV2.items.nodes
+  | map(select(.iteration.title == "12월 1/4"))
+  | map(select(.content.labels.nodes | any(.name == "blocked")))
+'
 ```
 
 ## 지연 일수 계산
@@ -154,9 +226,9 @@ Critical 블로커 발견 시 자동 알림:
 ```
 🚨 *블로커 감지*
 
-Sprint 23에서 Critical 블로커가 발견되었습니다.
+Sprint 12월 1/4에서 Critical 블로커가 발견되었습니다.
 
-• #234 댓글 API (@kyago) - 5일 지연
+• core-backend#234 댓글 API (@kyago) - 5일 지연
 
 즉시 확인이 필요합니다.
 ```
@@ -169,7 +241,7 @@ Sprint 23에서 Critical 블로커가 발견되었습니다.
 # 🚨 블로커 현황
 
 **기준일**: {report_date}
-**Sprint**: {sprint_name}
+**Iteration**: {iteration_title}
 
 ## 🔴 Critical ({critical_count})
 {critical_table}

@@ -34,7 +34,7 @@ model: inherit
 
 ```yaml
 member: "@kyago"                  # 선택 (기본: 전체)
-sprint_name: "Sprint 23"          # 선택 (기본: 현재 Sprint)
+iteration_title: "12월 1/4"       # 선택 (기본: 현재 Iteration)
 format: "markdown"                # 선택
 ```
 
@@ -43,12 +43,12 @@ format: "markdown"                # 선택
 ```markdown
 # 👥 팀원별 업무 현황
 
-**Sprint**: Sprint 23
-**기간**: 2024-12-02 ~ 2024-12-13
+**Iteration**: 12월 1/4
+**기간**: 2025-12-01 ~ 2025-12-07
 
 ## 📊 요약
 
-| 담당자 | 할당 | 완료 | 진행중 | 대기 | 완료율 |
+| 담당자 | 할당 | 완료 | 작업중 | 대기 | 완료율 |
 |--------|------|------|--------|------|--------|
 | @kyago | 12pt | 8pt | 3pt | 1pt | 67% |
 | @Garden | 10pt | 7pt | 3pt | 0pt | 70% |
@@ -66,28 +66,27 @@ format: "markdown"                # 선택
 ```markdown
 # 👤 @kyago 업무 현황
 
-**Sprint**: Sprint 23
-**기간**: 2024-12-02 ~ 2024-12-13
+**Iteration**: 12월 1/4
+**기간**: 2025-12-01 ~ 2025-12-07
 
 ## 📊 요약
 
 | 항목 | 값 |
 |------|-----|
-| 할당 Point | 12pt |
-| 완료 Point | 8pt |
+| 할당 작업량 | 12pt |
+| 완료 작업량 | 8pt |
 | 완료율 | 67% |
-| 용량 대비 | 120% ⚠️ |
 
 ## ✅ 완료 (3)
-- [x] #450 로그인 페이지 리팩토링 (3pt)
-- [x] #451 에러 핸들링 개선 (2pt)
-- [x] #452 테스트 코드 작성 (3pt)
+- [x] #450 로그인 페이지 리팩토링 (3pt) - command-center
+- [x] #451 에러 핸들링 개선 (2pt) - cm-land
+- [x] #452 테스트 코드 작성 (3pt) - cm-land
 
-## 🔄 진행중 (1)
-- [ ] #456 댓글 API 구현 (3pt) - 70% 완료
+## 🔄 작업중 (1)
+- [ ] #456 댓글 API 구현 (3pt) - core-backend
 
 ## ⏳ 대기 (1)
-- [ ] #458 알림 연동 (1pt)
+- [ ] #458 알림 연동 (1pt) - command-center
 
 ## ⚠️ 블로커
 - #234: 의존성 미해결 (3일 지연)
@@ -95,44 +94,98 @@ format: "markdown"                # 선택
 
 ## API 호출
 
-### 인원별 Task 조회
+### 인원별 Task 조회 (GraphQL)
 
 ```bash
-# 특정 담당자의 Sprint Task
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --assignee "kyago" \
-  --state all \
-  --json number,title,state,labels
+gh api graphql -f query='
+{
+  organization(login: "semicolon-devteam") {
+    projectV2(number: 1) {
+      items(first: 100) {
+        nodes {
+          content {
+            ... on Issue {
+              number
+              title
+              state
+              repository {
+                name
+              }
+              assignees(first: 5) {
+                nodes {
+                  login
+                }
+              }
+            }
+          }
+          iteration: fieldValueByName(name: "이터레이션") {
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+            }
+          }
+          status: fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+          workload: fieldValueByName(name: "작업량") {
+            ... on ProjectV2ItemFieldNumberValue {
+              number
+            }
+          }
+        }
+      }
+    }
+  }
+}'
 ```
 
-### 전체 팀원 Task
+### 담당자별 그룹화 (jq)
 
 ```bash
-# Sprint Task 전체 조회 후 담당자별 그룹화
-gh issue list \
-  --repo semicolon-devteam/docs \
-  --label "sprint-23" \
-  --state all \
-  --json number,title,state,labels,assignees
+# 특정 Iteration + 특정 담당자 필터링
+| jq '
+  .data.organization.projectV2.items.nodes
+  | map(select(.iteration.title == "12월 1/4"))
+  | map(select(.content.assignees.nodes | any(.login == "kyago")))
+  | group_by(.status.name)
+  | map({
+      status: .[0].status.name,
+      items: [.[] | {
+        number: .content.number,
+        title: .content.title,
+        repo: .content.repository.name,
+        workload: .workload.number
+      }]
+    })
+'
 ```
 
-## 업무량 분석
+### 전체 팀원 요약
 
-### 용량 대비 할당률
-
-```javascript
-function calculateCapacityUsage(assigned, capacity) {
-  const usage = (assigned / capacity) * 100;
-
-  if (usage <= 80) return { status: '🟢', text: '적정' };
-  if (usage <= 100) return { status: '🟡', text: '주의' };
-  return { status: '🔴', text: '초과' };
-}
+```bash
+# Iteration 필터링 후 담당자별 집계
+| jq '
+  .data.organization.projectV2.items.nodes
+  | map(select(.iteration.title == "12월 1/4"))
+  | map(. as $item | .content.assignees.nodes[] | {
+      assignee: .login,
+      status: $item.status.name,
+      workload: ($item.workload.number // 0)
+    })
+  | group_by(.assignee)
+  | map({
+      assignee: .[0].assignee,
+      total: ([.[].workload] | add),
+      done: ([.[] | select(.status == "병합됨" or .status == "검수완료") | .workload] | add // 0),
+      in_progress: ([.[] | select(.status == "작업중" or .status == "리뷰요청") | .workload] | add // 0),
+      todo: ([.[] | select(.status == "검수대기") | .workload] | add // 0)
+    })
+  | map(. + {completion_rate: (if .total > 0 then ((.done / .total) * 100 | floor) else 0 end)})
+'
 ```
 
-### 완료율 계산
+## 완료율 계산
 
 ```javascript
 function calculateCompletionRate(done, total) {
@@ -143,15 +196,15 @@ function calculateCompletionRate(done, total) {
 
 ## Semicolon 팀원 목록
 
-| GitHub ID | 이름 | 기본 용량 |
+| GitHub ID | 이름 | 기술영역 |
 |-----------|------|----------|
-| kyago | 강용준 | 10pt |
-| garden92 | 서정원 | 10pt |
-| Roki-Noh | 노영록 | 10pt |
-| beomsun1234 | 장현봉 | 10pt |
-| DwightKang | 강동현 | 10pt |
-| yeomso | 염현준 | 10pt |
-| reus-jeon | 전준영 | 7pt |
+| kyago | 강용준 | 백엔드 |
+| garden92 | 서정원 | 프론트 |
+| Roki-Noh | 노영록 | 프론트 |
+| beomsun1234 | 장현봉 | 백엔드 |
+| DwightKang | 강동현 | 운영/기획 |
+| yeomso | 염현준 | 프론트 |
+| reus-jeon | 전준영 | 운영/기획 |
 
 ## 완료 메시지
 
@@ -160,7 +213,7 @@ function calculateCompletionRate(done, total) {
 
 # 👥 팀원별 업무 현황
 
-**Sprint**: {sprint_name}
+**Iteration**: {iteration_title}
 
 ## 📊 요약
 
@@ -171,6 +224,6 @@ function calculateCompletionRate(done, total) {
 ## 🔥 주요 현황
 
 - **가장 높은 완료율**: {top_performer}
-- **업무 과중**: {overloaded_members}
+- **가장 많은 할당**: {most_assigned}
 - **블로커 보유**: {blocked_members}
 ```
