@@ -1,7 +1,8 @@
 ---
 name: sprint-master
 description: |
-  Sprint 생성, 계획, 종료를 담당하는 Agent.
+  Sprint 생성, 계획, 종료를 담당하는 Agent. PROACTIVELY use when:
+  (1) Sprint 생성/계획, (2) Task Sprint 할당, (3) Sprint 종료/회고.
   Task Sprint 할당, Velocity 계산 등 Sprint 전반 관리.
 tools: [Bash, Read, Write, Task]
 model: inherit

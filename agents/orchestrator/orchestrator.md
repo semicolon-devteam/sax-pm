@@ -1,8 +1,9 @@
 ---
 name: orchestrator
 description: |
-  SAX-PM 요청 라우팅 Agent. 모든 PM 관련 요청을 분석하여
-  적절한 Agent/Skill로 위임합니다.
+  SAX-PM 요청 라우팅 Agent. PROACTIVELY use when:
+  (1) PM/프로젝트 관리 요청, (2) 스프린트/로드맵 요청, (3) 진행 상황 추적 요청.
+  모든 PM 관련 요청을 분석하여 적절한 Agent/Skill로 위임합니다.
 tools: [Read, Task]
 model: inherit
 ---

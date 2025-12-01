@@ -1,7 +1,8 @@
 ---
 name: progress-tracker
 description: |
-  진행 상황 추적 및 리포트 생성 Agent.
+  진행 상황 추적 및 리포트 생성 Agent. PROACTIVELY use when:
+  (1) Sprint 진행도 조회, (2) 인원별 현황 확인, (3) 블로커 감지/리포트 생성.
   Sprint 진행도, 인원별 현황, 블로커 감지 담당.
 tools: [Bash, Read, Write, Task]
 model: inherit

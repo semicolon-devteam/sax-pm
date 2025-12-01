@@ -1,7 +1,8 @@
 ---
 name: roadmap-planner
 description: |
-  장기 일정 계획 및 Roadmap 시각화 Agent.
+  장기 일정 계획 및 Roadmap 시각화 Agent. PROACTIVELY use when:
+  (1) Roadmap 생성/조회, (2) 마일스톤 관리, (3) 장기 일정 계획.
   Epic 기반 타임라인, 마일스톤 관리 담당.
 tools: [Bash, Read, Write, Task]
 model: inherit
