@@ -160,4 +160,5 @@ jq '. + {
 
 - [Onboarding Phases](references/onboarding-phases.md)
 - [SAX Core PRINCIPLES.md](https://github.com/semicolon-devteam/sax-core/blob/main/PRINCIPLES.md)
+- [Team Context Guide](https://github.com/semicolon-devteam/sax-core/blob/main/_shared/team-context.md)
 - [health-check Skill](../../skills/health-check/SKILL.md)
